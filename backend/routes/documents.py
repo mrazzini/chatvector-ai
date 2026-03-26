@@ -1,8 +1,9 @@
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 
 import db
+from core.config import STALE_INGESTION_STATUSES
 from services.queue_service import ingestion_queue
 
 logger = logging.getLogger(__name__)
@@ -39,3 +40,43 @@ async def get_document_status(document_id: str):
             response["queue_position"] = queue_pos
 
     return response
+
+
+@router.delete("/documents/{document_id}", status_code=204)
+async def delete_document(document_id: str):
+    status_payload = await db.get_document_status(document_id)
+    if not status_payload:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "document_not_found",
+                "message": "Document not found.",
+                "document_id": document_id,
+            },
+        )
+    
+    status = status_payload.get("status")
+    
+    # Jobs already picked up by a worker are tracked via status rather than the queue
+    if status in STALE_INGESTION_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "document_processing",
+                "message": f"Document cannot be deleted while in '{status}' state.",
+                "document_id": document_id,
+            },
+        )
+        
+    if ingestion_queue.queue_position(document_id) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "document_queued",
+                "message": "Document cannot be deleted while in the queue.",
+                "document_id": document_id,
+            },
+        )
+
+    await db.delete_document(document_id)
+    return Response(status_code=204)
