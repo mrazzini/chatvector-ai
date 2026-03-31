@@ -1,5 +1,64 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+export type ChatSource = {
+  file_name: string;
+  page_number: number;
+  chunk_index: number;
+};
+
+export type ChatResponse = {
+  question: string;
+  chunks: number;
+  answer: string;
+  sources: ChatSource[];
+};
+
+export class ChatError extends Error {
+  constructor(
+    public readonly code: "no_document" | "backend_unreachable" | "unexpected",
+    message: string
+  ) {
+    super(message);
+    this.name = "ChatError";
+  }
+}
+
+export async function sendMessage(
+  question: string,
+  docId: string,
+  matchCount = 5
+): Promise<ChatResponse> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, doc_id: docId, match_count: matchCount }),
+    });
+  } catch {
+    throw new ChatError(
+      "backend_unreachable",
+      "Cannot reach the server. Check your connection."
+    );
+  }
+
+  if (res.status === 404 || res.status === 422) {
+    throw new ChatError(
+      "no_document",
+      "Document not found. It may have been deleted."
+    );
+  }
+
+  if (!res.ok) {
+    throw new ChatError(
+      "unexpected",
+      `Server error (${res.status}). Please try again.`
+    );
+  }
+
+  return (await res.json()) as ChatResponse;
+}
+
 export async function deleteDocument(
   documentId: string
 ): Promise<"gone" | "conflict" | "error"> {

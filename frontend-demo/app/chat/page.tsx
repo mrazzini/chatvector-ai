@@ -4,13 +4,21 @@ import { useState, useRef, useEffect } from "react";
 import { Send, Bot, User, FileText, X } from "lucide-react";
 import UploadButton from "../components/UploadButton";
 import UploadModal from "../components/UploadModal";
-import { deleteDocument, DocumentNotFoundError, getDocumentStatus } from "../lib/api";
+import {
+  deleteDocument,
+  DocumentNotFoundError,
+  getDocumentStatus,
+  sendMessage,
+  ChatError,
+} from "../lib/api";
+import type { ChatSource } from "../lib/api";
 
 type Message = {
   id: number;
   sender: "ai" | "user";
   text: string;
   document_id?: string;
+  sources?: ChatSource[];
 };
 
 type AttachmentState = {
@@ -20,25 +28,22 @@ type AttachmentState = {
   status: "processing" | "ready" | "failed";
 };
 
-// Demo placeholder messages — not persisted
-const sampleMessages: Message[] = [
+const welcomeMessages: Message[] = [
   { id: 1, sender: "ai", text: "Hello! I'm ChatVector. Upload a document and I'll help you find answers from it." },
-  { id: 2, sender: "user", text: "What is RAG?" },
-  { id: 3, sender: "ai", text: "RAG stands for Retrieval-Augmented Generation. It retrieves relevant context from your documents before generating an answer." },
-  { id: 4, sender: "user", text: "That sounds cool! Can I upload a PDF?" },
 ];
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>(sampleMessages);
+  const [messages, setMessages] = useState<Message[]>(welcomeMessages);
   const [input, setInput] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [attachment, setAttachment] = useState<AttachmentState | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [inflight, setInflight] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, inflight]);
 
   useEffect(() => {
     if (!attachment || attachment.status !== "processing") return;
@@ -94,15 +99,58 @@ export default function ChatPage() {
     };
   }, [attachment?.documentId, attachment?.status]);
 
-  const handleSend = () => {
-    if (!input.trim()) return;
-    const document_id =
-      attachment?.status === "ready" ? attachment.documentId : undefined;
+  const handleSend = async () => {
+    const text = input.trim();
+    if (!text || inflight) return;
+    setInput("");
+
+    if (attachment?.status !== "ready") {
+      setMessages((prev) => [
+        ...prev,
+        { id: Date.now(), sender: "user", text },
+        {
+          id: Date.now() + 1,
+          sender: "ai",
+          text: "Please upload a document first so I can answer questions about it.",
+        },
+      ]);
+      return;
+    }
+
     setMessages((prev) => [
       ...prev,
-      { id: Date.now(), sender: "user", text: input.trim(), document_id },
+      { id: Date.now(), sender: "user", text, document_id: attachment.documentId },
     ]);
-    setInput("");
+    setInflight(true);
+
+    try {
+      const response = await sendMessage(text, attachment.documentId);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now(),
+          sender: "ai",
+          text: response.answer,
+          sources: response.sources,
+        },
+      ]);
+    } catch (e) {
+      let errorText = "Something went wrong. Please try again.";
+      if (e instanceof ChatError) {
+        errorText = e.message;
+        if (e.code === "no_document") {
+          setAttachment((curr) =>
+            curr ? { ...curr, status: "failed" } : curr
+          );
+        }
+      }
+      setMessages((prev) => [
+        ...prev,
+        { id: Date.now(), sender: "ai", text: errorText },
+      ]);
+    } finally {
+      setInflight(false);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -189,6 +237,16 @@ export default function ChatPage() {
             </div>
           </div>
         ))}
+        {inflight && (
+          <div className="flex items-end gap-2">
+            <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center bg-indigo-600">
+              <Bot size={16} />
+            </div>
+            <div className="px-4 py-3 rounded-2xl rounded-bl-none bg-gray-800 text-gray-400 text-sm animate-pulse">
+              Thinking...
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -239,11 +297,13 @@ export default function ChatPage() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Ask about your document..."
-            className="flex-1 bg-transparent outline-none text-sm text-white placeholder-gray-500"
+            disabled={inflight}
+            className="flex-1 bg-transparent outline-none text-sm text-white placeholder-gray-500 disabled:opacity-50"
           />
           <button
             onClick={handleSend}
-            className="w-8 h-8 rounded-lg bg-indigo-600 hover:bg-indigo-500 flex items-center justify-center transition"
+            disabled={inflight || !input.trim()}
+            className="w-8 h-8 rounded-lg bg-indigo-600 hover:bg-indigo-500 flex items-center justify-center transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Send size={15} />
           </button>
