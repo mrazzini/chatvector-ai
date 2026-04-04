@@ -51,12 +51,6 @@ export default function ChatPage() {
   }, [messages, inflight]);
 
   useEffect(() => {
-    if (poll.status === "ready") {
-      setShowModal(false);
-    }
-  }, [poll.status]);
-
-  useEffect(() => {
     readyAnnouncedForDocRef.current = null;
   }, [attachment?.documentId]);
 
@@ -104,11 +98,10 @@ export default function ChatPage() {
   const handleSend = async () => {
     const text = input.trim();
     if (!text || inflight) return;
-    if (attachment?.status === "processing") return;
 
     setInput("");
 
-    if (attachment?.status !== "ready") {
+    if (attachment === null) {
       const base = Date.now();
       setMessages((prev) => [
         ...prev,
@@ -117,6 +110,34 @@ export default function ChatPage() {
           id: base + 1,
           sender: "ai",
           text: "Please upload a document first so I can answer questions about it.",
+        },
+      ]);
+      return;
+    }
+
+    if (attachment.status === "processing") {
+      const base = Date.now();
+      setMessages((prev) => [
+        ...prev,
+        { id: base, sender: "user", text },
+        {
+          id: base + 1,
+          sender: "ai",
+          text: "Your document is still processing. Please wait a moment and try again.",
+        },
+      ]);
+      return;
+    }
+
+    if (attachment.status === "failed") {
+      const base = Date.now();
+      setMessages((prev) => [
+        ...prev,
+        { id: base, sender: "user", text },
+        {
+          id: base + 1,
+          sender: "ai",
+          text: "Document processing failed. Please remove it and upload again.",
         },
       ]);
       return;
@@ -217,6 +238,15 @@ export default function ChatPage() {
           onClose={() => setShowModal(false)}
           onBeforeUpload={handleBeforeUpload}
           onUploadAccepted={handleUploadAccepted}
+          attachment={
+            attachment
+              ? {
+                  status: attachment.status,
+                  stage: poll.stage,
+                  chunks: poll.chunks,
+                }
+              : null
+          }
         />
       )}
 
