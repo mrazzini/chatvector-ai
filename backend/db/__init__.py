@@ -6,6 +6,8 @@ Unified DB interface with environment-based backend selection and retry wrappers
 """
 
 import logging
+import threading
+from contextlib import asynccontextmanager
 
 from core.config import config
 from utils.retry import retry_async
@@ -16,9 +18,20 @@ logger = logging.getLogger(__name__)
 # Chosen database service singleton (kept public for tests)
 db_service = None
 
+_thread_local = threading.local()
+
 
 def get_db_service():
-    """Return singleton DB service based on APP_ENV."""
+    """Return singleton DB service, preferring thread-local override.
+
+    RQ worker threads install a thread-local override via
+    :func:`worker_db_context` so their SQLAlchemy async engine is
+    bound to the worker's own event loop, not the main thread's.
+    """
+    thread_local_service = getattr(_thread_local, "db_service_override", None)
+    if thread_local_service is not None:
+        return thread_local_service
+
     global db_service
 
     if db_service is not None:
@@ -36,6 +49,36 @@ def get_db_service():
         logger.info("Using Supabase database service (production)")
 
     return db_service
+
+
+@asynccontextmanager
+async def worker_db_context():
+    """Install a fresh DB service on the current thread for RQ workers.
+
+    In development (SQLAlchemy), a new :class:`SQLAlchemyService` is
+    created so its async engine is bound to the worker thread's event
+    loop rather than the main thread's.  The engine is disposed on exit.
+
+    In production (Supabase), the global singleton is returned as-is
+    because ``SupabaseService`` uses synchronous httpx under the hood
+    and does not have the event loop binding issue.
+    """
+    if config.APP_ENV.lower() != "development":
+        yield get_db_service()
+        return
+
+    from .sqlalchemy_service import SQLAlchemyService
+
+    service = SQLAlchemyService()
+    _thread_local.db_service_override = service
+    try:
+        yield service
+    finally:
+        _thread_local.db_service_override = None
+        try:
+            await service.engine.dispose()
+        except Exception:
+            logger.warning("Failed to dispose worker DB engine")
 
 
 async def create_document(filename: str) -> str:
@@ -208,11 +251,11 @@ async def delete_document(doc_id: str) -> None:
     )
 
 
-async def fail_stale_documents(statuses: list[str]) -> int:
+async def fail_stale_documents(statuses: list[str]) -> set[str]:
     """
     Bulk-fail documents left in an in-progress state by a previous restart.
 
-    Returns the number of documents updated.
+    Returns the set of document IDs that were updated.
     """
     service = get_db_service()
 
@@ -231,6 +274,7 @@ async def fail_stale_documents(statuses: list[str]) -> int:
 
 __all__ = [
     "get_db_service",
+    "worker_db_context",
     "create_document",
     "store_chunks_with_embeddings",
     "get_document",
