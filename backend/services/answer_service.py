@@ -1,23 +1,18 @@
-"""LLM answer generation for RAG chat using the Gemini API (same client stack as embeddings)."""
+"""LLM answer generation for RAG chat — delegates to the configured provider."""
 
-import asyncio
 import logging
 from pathlib import Path
 
-import httpx
-from google import genai
-from google.genai import types as genai_types
-from google.genai.errors import APIError
-
 from core.config import config
+from services.providers import get_llm_provider
+from services.providers.base import (
+    ProviderAuthError,
+    ProviderConnectionError,
+    ProviderRateLimitError,
+    ProviderTimeoutError,
+)
 
 logger = logging.getLogger(__name__)
-
-# Use the SAME client as embedding service
-client = genai.Client(
-    api_key=config.GEN_AI_KEY,
-    http_options=genai_types.HttpOptions(timeout=config.LLM_HTTP_TIMEOUT_MS),
-)
 
 
 def _load_system_prompt() -> str:
@@ -64,78 +59,67 @@ def _msg_unexpected() -> str:
     return LLM_MSG_UNEXPECTED
 
 
+def _api_key_present() -> bool:
+    """Check whether the active provider has credentials available."""
+    provider = config.LLM_PROVIDER
+    if provider == "gemini":
+        key = config.GEN_AI_KEY
+    elif provider == "openai":
+        key = config.OPENAI_API_KEY
+    else:
+        # Ollama typically needs no key.
+        return True
+    return key is not None and str(key).strip() != ""
+
+
 async def generate_answer(question: str, context: str) -> str:
     """
-    Generate an answer using Gemini LLM based on the provided context.
+    Generate an answer using the configured LLM provider.
+
+    Error classification is provider-agnostic: providers raise common
+    exceptions (ProviderRateLimitError, etc.) and this function maps
+    them to user-facing messages.
     """
     contents = f"CONTEXT:\n{context}\n\nQUESTION:\n{question}"
 
-    key = config.GEN_AI_KEY
-    if key is None or not str(key).strip():
+    if not _api_key_present():
         logger.error(
-            "LLM cannot run: GEN_AI_KEY is missing or empty",
+            "LLM cannot run: API key is missing or empty for provider %s",
+            config.LLM_PROVIDER,
             extra={"error_type": "MissingAPIKey"},
         )
         return _msg_missing_api_key()
 
-    config_obj = genai_types.GenerateContentConfig(
-        system_instruction=_SYSTEM_PROMPT,
-        temperature=config.LLM_TEMPERATURE,
-        max_output_tokens=config.LLM_MAX_OUTPUT_TOKENS,
-    )
-
     try:
-        # Use the new API like embeddings do
-        response = await asyncio.to_thread(
-            client.models.generate_content,
-            model="gemini-2.5-flash",
-            contents=contents,
-            config=config_obj,
+        provider = get_llm_provider()
+        answer = await provider.generate(
+            contents,
+            system_instruction=_SYSTEM_PROMPT,
+            temperature=config.LLM_TEMPERATURE,
+            max_output_tokens=config.LLM_MAX_OUTPUT_TOKENS,
         )
-
-        answer = response.text or "No response."
         logger.info("Answer generated successfully")
         return answer
 
-    except APIError as e:
-        code = getattr(e, "code", None)
-        status = str(getattr(e, "status", "") or "").lower()
-        msg = str(e).lower()
-        exc_name = type(e).__name__
-        if code == 429 or "resource_exhausted" in status or "quota" in msg:
-            logger.error(
-                "LLM rate limit or quota (%s): %s",
-                exc_name,
-                e,
-                extra={"error_type": exc_name, "http_code": code},
-            )
-            return _msg_rate_limit()
-        if code in (401, 403) or "unauthenticated" in msg or "permission_denied" in status:
-            logger.error(
-                "LLM API key rejected or unauthorized (%s): %s",
-                exc_name,
-                e,
-                extra={"error_type": exc_name, "http_code": code},
-            )
-            return _msg_invalid_api_key()
-        if code == 400 and ("api key" in msg or "api_key" in msg or "invalid key" in msg):
-            logger.error(
-                "LLM invalid API key (%s): %s",
-                exc_name,
-                e,
-                extra={"error_type": exc_name, "http_code": code},
-            )
-            return _msg_invalid_api_key()
+    except ProviderRateLimitError as e:
         logger.error(
-            "LLM API error (%s): %s",
-            exc_name,
+            "LLM rate limit or quota (%s): %s",
+            type(e).__name__,
             e,
-            exc_info=True,
-            extra={"error_type": exc_name, "http_code": code},
+            extra={"error_type": type(e).__name__},
         )
-        return _msg_unexpected()
+        return _msg_rate_limit()
 
-    except httpx.TimeoutException as e:
+    except ProviderAuthError as e:
+        logger.error(
+            "LLM API key rejected or unauthorized (%s): %s",
+            type(e).__name__,
+            e,
+            extra={"error_type": type(e).__name__},
+        )
+        return _msg_invalid_api_key()
+
+    except ProviderTimeoutError as e:
         logger.error(
             "LLM request timeout (%s): %s",
             type(e).__name__,
@@ -145,19 +129,9 @@ async def generate_answer(question: str, context: str) -> str:
         )
         return _msg_timeout_or_connection()
 
-    except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.NetworkError) as e:
+    except ProviderConnectionError as e:
         logger.error(
             "LLM connection error (%s): %s",
-            type(e).__name__,
-            e,
-            exc_info=True,
-            extra={"error_type": type(e).__name__},
-        )
-        return _msg_timeout_or_connection()
-
-    except (TimeoutError, ConnectionError, BrokenPipeError) as e:
-        logger.error(
-            "LLM timeout or connection error (%s): %s",
             type(e).__name__,
             e,
             exc_info=True,

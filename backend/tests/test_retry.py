@@ -4,11 +4,10 @@ Tests both the retry mechanism and error classification.
 """
 import asyncio
 
-import httpx
 import pytest
-from google.genai.errors import APIError
 from unittest.mock import AsyncMock, patch
 
+from services.providers.base import ProviderRateLimitError, ProviderTimeoutError
 from utils.retry import retry_async, is_transient_error
 
 @pytest.mark.asyncio
@@ -155,30 +154,18 @@ def test_transient_error_detection():
     assert is_transient_error(Exception("permission denied")) is False
 
 
-def test_is_transient_error_api_error_429():
-    resp = httpx.Response(
-        429,
-        json={
-            "error": {
-                "status": "RESOURCE_EXHAUSTED",
-                "message": "Rate exceeded",
-            }
-        },
-    )
-    assert is_transient_error(APIError(429, resp)) is True
+def test_is_transient_error_provider_rate_limit():
+    """ProviderRateLimitError should always be transient."""
+    assert is_transient_error(ProviderRateLimitError("Rate exceeded")) is True
 
 
-def test_is_transient_error_api_error_resource_exhausted_in_status():
-    resp = httpx.Response(
-        503,
-        json={"error": {"status": "RESOURCE_EXHAUSTED", "message": "Try later"}},
-    )
-    assert is_transient_error(APIError(503, resp)) is True
+def test_is_transient_error_provider_timeout():
+    """ProviderTimeoutError should always be transient."""
+    assert is_transient_error(ProviderTimeoutError("Request timed out")) is True
 
 
-def test_is_transient_error_api_error_non_transient():
-    resp = httpx.Response(
-        400,
-        json={"error": {"status": "INVALID_ARGUMENT", "message": "Malformed request"}},
-    )
-    assert is_transient_error(APIError(400, resp)) is False
+def test_is_transient_error_generic_provider_error_non_transient():
+    """A generic ProviderError (e.g. bad request) should not be transient."""
+    from services.providers.base import ProviderError
+
+    assert is_transient_error(ProviderError("Malformed request")) is False

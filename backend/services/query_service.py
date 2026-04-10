@@ -1,11 +1,9 @@
 """Query transformation for retrieval (rewrite, expand, step-back)."""
 
-import asyncio
 import logging
 
-from google.genai import types
-
 from core.config import config
+from services.providers import get_llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -14,21 +12,15 @@ _TRANSFORM_MAX_OUTPUT_TOKENS = 512
 
 
 async def _llm_transform(system_instruction: str, user_text: str) -> str | None:
-    from services.answer_service import client as _genai_client
-
-    config_obj = types.GenerateContentConfig(
-        system_instruction=system_instruction,
-        temperature=_TRANSFORM_TEMPERATURE,
-        max_output_tokens=_TRANSFORM_MAX_OUTPUT_TOKENS,
-    )
     try:
-        response = await asyncio.to_thread(
-            _genai_client.models.generate_content,
-            model="gemini-2.5-flash",
-            contents=user_text,
-            config=config_obj,
+        provider = get_llm_provider()
+        text = await provider.generate(
+            user_text,
+            system_instruction=system_instruction,
+            temperature=_TRANSFORM_TEMPERATURE,
+            max_output_tokens=_TRANSFORM_MAX_OUTPUT_TOKENS,
         )
-        text = (response.text or "").strip()
+        text = (text or "").strip()
         return text if text else None
     except Exception as e:
         logger.warning(

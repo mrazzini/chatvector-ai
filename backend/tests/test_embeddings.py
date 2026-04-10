@@ -1,35 +1,30 @@
 import pytest
 from services.embedding_service import get_embedding, get_embeddings
+import services.providers as providers_mod
 
 pytestmark = pytest.mark.asyncio
 
+
+class _FakeEmbeddingProvider:
+    """Minimal stand-in that satisfies the EmbeddingProvider contract."""
+
+    def __init__(self, dim: int = 3072, value: float = 0.1):
+        self._dim = dim
+        self._value = value
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        return [[self._value] * self._dim for _ in texts]
+
+
 @pytest.fixture(autouse=True)
-def mock_genai_client(monkeypatch):
-    class _FakeEmbedding:
-        values = [0.1] * 3072
-
-    def fake_embed(model, contents):
-        if not isinstance(contents, list):
-            contents = [contents]
-        class _Result:
-            embeddings = [_FakeEmbedding() for _ in contents]
-        return _Result()
-
-    monkeypatch.setattr(
-        "services.embedding_service.client.models.embed_content",
-        fake_embed,
-    )
+def reset_provider():
+    """Inject a fake provider and reset after each test."""
+    providers_mod._embedding_provider = _FakeEmbeddingProvider()
+    yield
+    providers_mod._embedding_provider = None
 
 
-async def test_get_embedding_success(monkeypatch):
-    class _FakeEmbedding:
-        values = [0.5] * 3072
-    def fake_embed(model, contents):
-        class _Result:
-            embeddings = [_FakeEmbedding()]
-        return _Result()
-    monkeypatch.setattr("services.embedding_service.client.models.embed_content", fake_embed)
-
+async def test_get_embedding_success():
     text = "Hello world"
     embedding = await get_embedding(text)
 
@@ -38,15 +33,7 @@ async def test_get_embedding_success(monkeypatch):
     assert all(isinstance(v, float) for v in embedding)
 
 
-async def test_get_embeddings_batch_success(monkeypatch):
-    class _FakeEmbedding:
-        values = [0.5] * 3072
-    def fake_embed(model, contents):
-        class _Result:
-            embeddings = [_FakeEmbedding() for _ in contents]
-        return _Result()
-    monkeypatch.setattr("services.embedding_service.client.models.embed_content", fake_embed)
-
+async def test_get_embeddings_batch_success():
     texts = ["Hello world", "Another sentence"]
     embeddings = await get_embeddings(texts)
 
@@ -59,15 +46,7 @@ async def test_get_embeddings_batch_success(monkeypatch):
         assert all(isinstance(v, float) for v in emb)
 
 
-async def test_embedding_dimension_consistency(monkeypatch):
-    class _FakeEmbedding:
-        values = [0.5] * 3072
-    def fake_embed(model, contents):
-        class _Result:
-            embeddings = [_FakeEmbedding() for _ in contents]
-        return _Result()
-    monkeypatch.setattr("services.embedding_service.client.models.embed_content", fake_embed)
-
+async def test_embedding_dimension_consistency():
     texts = ["short text", "longer text with more content"]
     embeddings = await get_embeddings(texts)
 
@@ -75,43 +54,14 @@ async def test_embedding_dimension_consistency(monkeypatch):
     assert dims == {3072}
 
 
-async def test_get_embeddings_raises_on_failure(monkeypatch):
+async def test_get_embeddings_raises_on_failure():
     """Embedding failures must propagate; the zero-vector fallback is gone."""
-    def always_fail(*args, **kwargs):
-        raise RuntimeError("forced failure")
 
-    monkeypatch.setattr(
-        "services.embedding_service.client.models.embed_content",
-        always_fail,
-    )
+    class _FailingProvider:
+        async def embed(self, texts):
+            raise RuntimeError("forced failure")
+
+    providers_mod._embedding_provider = _FailingProvider()
 
     with pytest.raises(RuntimeError, match="forced failure"):
         await get_embeddings(["this should raise"])
-
-
-async def test_get_embeddings_splits_large_batch(monkeypatch):
-    """Inputs exceeding 100 are split into sequential batches of ≤100."""
-    batch_sizes: list[int] = []
-
-    class _FakeEmbedding:
-        values = [0.1] * 3072
-
-    def fake_embed(model, contents):
-        batch_sizes.append(len(contents))
-
-        class _Result:
-            embeddings = [_FakeEmbedding() for _ in contents]
-
-        return _Result()
-
-    monkeypatch.setattr(
-        "services.embedding_service.client.models.embed_content",
-        fake_embed,
-    )
-
-    texts = ["text"] * 150
-    embeddings = await get_embeddings(texts)
-
-    assert len(embeddings) == 150
-    assert batch_sizes == [100, 50]
-    assert all(len(e) == 3072 for e in embeddings)

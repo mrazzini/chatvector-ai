@@ -56,6 +56,31 @@ This ensures:
 
 ---
 
+## LLM & Embedding Providers
+
+An abstract base class defines the contract for each service type:
+
+- `EmbeddingProvider` — `async def embed(texts) -> list[list[float]]`
+- `LLMProvider` — `async def generate(prompt, ...) -> str`
+
+Three implementations:
+
+- `GeminiEmbeddingProvider` / `GeminiLLMProvider` (default)
+- `OpenAIEmbeddingProvider` / `OpenAILLMProvider`
+- `OllamaEmbeddingProvider` / `OllamaLLMProvider`
+
+Selected via environment variables (`LLM_PROVIDER`, `EMBEDDING_PROVIDER`) through factory functions in:
+
+```
+backend/services/providers/__init__.py
+```
+
+Providers map SDK-specific errors to common exceptions so services stay provider-agnostic.
+
+Switching embedding providers requires a fresh database (`docker compose down -v`) because different models produce different vector dimensions and incompatible vector spaces.
+
+---
+
 ## Development vs Production
 
 | Environment | Database                  | Implementation    |
@@ -293,7 +318,7 @@ is still retried after TTL expires. Each result includes `cached` and
 ## Vector Search Design
 
 - PostgreSQL with `pgvector` extension
-- Embedding dimension: `3072` (Gemini `gemini-embedding-001`)
+- Embedding dimension: auto-detected from the configured provider/model (e.g. Gemini → 3072, OpenAI → 1536, Ollama nomic-embed-text → 768)
 - Cosine similarity search via `<=>` operator
 - `ivfflat` indexing supported
 
@@ -313,7 +338,7 @@ CREATE TABLE document_chunks (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
   chunk_text TEXT,
-  embedding vector(3072),
+  embedding vector,
   chunk_index INTEGER,
   page_number INTEGER,
   character_offset_start INTEGER,
@@ -380,8 +405,7 @@ responses. Security headers on every response.
 
 The current architecture supports these extensions without major refactors:
 
-- **Pluggable LLM & embedding providers** — Gemini, OpenAI, Ollama
-  (tracked in open issue)
+- ~~Pluggable LLM & embedding providers~~ (done — see LLM & Embedding Providers)
 - **Redis-backed queue** — drop-in replacement for in-memory queue (#123)
 - **Authentication & multi-tenancy** — Phase 3
 - **Streaming LLM responses** — Server-Sent Events, Phase 3

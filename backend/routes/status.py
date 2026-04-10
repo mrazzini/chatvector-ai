@@ -236,36 +236,16 @@ def _llm_error_code_from_answer_text(text: str) -> str | None:
 
 
 def _llm_classify_exception(exc: BaseException) -> str:
-    from google.genai.errors import APIError
+    from services.providers.base import (
+        ProviderConnectionError,
+        ProviderRateLimitError,
+        ProviderTimeoutError,
+    )
 
-    import httpx
-
-    if isinstance(exc, APIError):
-        code = getattr(exc, "code", None)
-        status = str(getattr(exc, "status", "") or "").lower()
-        msg = str(exc).lower()
-        if code == 429 or "resource_exhausted" in status or "quota" in msg:
-            return "rate_limited"
-        if code in (401, 403) or "unauthenticated" in msg or "permission_denied" in status:
-            return "error"
-        if code == 400 and ("api key" in msg or "api_key" in msg or "invalid key" in msg):
-            return "error"
-        return "error"
-
-    if isinstance(
-        exc,
-        (
-            httpx.TimeoutException,
-            httpx.ConnectError,
-            httpx.RemoteProtocolError,
-            httpx.NetworkError,
-        ),
-    ):
+    if isinstance(exc, ProviderRateLimitError):
+        return "rate_limited"
+    if isinstance(exc, (ProviderTimeoutError, ProviderConnectionError)):
         return "timeout"
-
-    if isinstance(exc, (TimeoutError, ConnectionError, BrokenPipeError)):
-        return "timeout"
-
     return "error"
 
 

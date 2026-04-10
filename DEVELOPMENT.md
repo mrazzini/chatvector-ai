@@ -117,8 +117,10 @@ docker exec -it chatvector-db psql -U postgres -d postgres
 \dx
 \dt
 
+-- Dimension depends on the configured embedding model
+-- (e.g. 3072 for Gemini, 1536 for OpenAI, 768 for Ollama nomic-embed-text)
 SELECT * FROM match_chunks(
-    array_fill(0::real, ARRAY[3072])::vector,
+    array_fill(0::real, ARRAY[<EMBEDDING_DIM>])::vector,
     1
 ) LIMIT 0;
 
@@ -180,7 +182,7 @@ queued → extracting → chunking → embedding → storing → completed
 ```env
 QUEUE_WORKER_COUNT=3      # concurrent background workers (1–5)
 QUEUE_MAX_SIZE=100        # max pending jobs; uploads beyond this return 503
-QUEUE_EMBEDDING_RPS=2.0   # max Gemini embedding API calls/sec across workers
+QUEUE_EMBEDDING_RPS=2.0   # max embedding API calls/sec across workers
 QUEUE_JOB_MAX_RETRIES=3   # retries before a job moves to DLQ
 QUEUE_RETRY_BASE_DELAY=2.0 # base seconds for retry backoff
 ```
@@ -378,6 +380,8 @@ pip install -r requirements.txt
 export DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/postgres"
 export APP_ENV="development"
 export GEN_AI_KEY="your-key"
+# Or for OpenAI: export OPENAI_API_KEY="your-key" LLM_PROVIDER=openai EMBEDDING_PROVIDER=openai
+# Or for Ollama: export LLM_PROVIDER=ollama EMBEDDING_PROVIDER=ollama
 
 uvicorn main:app --reload --port 8000
 ```
@@ -475,6 +479,11 @@ APP_ENV=development
 GEN_AI_KEY=your_google_ai_studio_key
 DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
 LOG_LEVEL=INFO
+
+# Provider selection (optional — defaults to gemini)
+# LLM_PROVIDER=gemini          # gemini | openai | ollama
+# EMBEDDING_PROVIDER=gemini    # gemini | openai | ollama
+# See backend/.env.example for all provider options
 ```
 
 See `backend/.env.example` for the full list including chunking

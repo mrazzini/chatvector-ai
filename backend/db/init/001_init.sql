@@ -20,7 +20,7 @@ CREATE TABLE document_chunks (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   document_id UUID REFERENCES documents(id),
   chunk_text TEXT,
-  embedding vector(3072),
+  embedding vector,
   chunk_index INTEGER NOT NULL DEFAULT 0,
   page_number INTEGER,
   character_offset_start INTEGER NOT NULL DEFAULT 0,
@@ -30,7 +30,7 @@ CREATE TABLE document_chunks (
 
 -- Vector search function
 CREATE OR REPLACE FUNCTION match_chunks(
-  query_embedding vector(3072),
+  query_embedding vector,
   match_count int DEFAULT 5,
   filter_document_id uuid DEFAULT NULL
 )

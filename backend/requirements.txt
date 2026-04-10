@@ -25,8 +25,11 @@ supabase-functions==2.24.0
 storage3==2.24.0
 realtime==2.24.0
 
-# -------- Google GenAI (ONLY this one) --------
+# -------- Google GenAI --------
 google-genai==1.6.0
+
+# -------- OpenAI --------
+openai>=1.0.0
 
 # -------- LangChain / RAG --------
 langchain==1.0.5

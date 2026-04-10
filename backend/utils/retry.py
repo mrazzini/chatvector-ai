@@ -41,22 +41,12 @@ def is_transient_error(exception: Exception) -> bool:
     if isinstance(exception, asyncio.TimeoutError):
         return True
 
-    try:
-        from google.genai.errors import APIError
+    # Provider-layer transient errors (rate limits, timeouts) are always retryable
+    # regardless of which provider is active.
+    from services.providers.base import ProviderRateLimitError, ProviderTimeoutError
 
-        if isinstance(exception, APIError):
-            code = getattr(exception, "code", None)
-            status = str(getattr(exception, "status", "") or "").lower()
-            msg = str(exception).lower()
-            if (
-                code == 429
-                or "resource_exhausted" in status
-                or "quota" in msg
-                or "rate_limit" in msg
-            ):
-                return True
-    except ImportError:
-        pass
+    if isinstance(exception, (ProviderRateLimitError, ProviderTimeoutError)):
+        return True
 
     error_str = str(exception).lower()
     logger.debug(f"Checking if error is transient: {error_str}")

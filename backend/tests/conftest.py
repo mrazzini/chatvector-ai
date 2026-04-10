@@ -12,6 +12,10 @@ os.environ.setdefault("APP_ENV", "production")
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_KEY", "test-key-123")
 os.environ.setdefault("GEN_AI_KEY", "test-genai-key")
+os.environ.setdefault("LLM_PROVIDER", "gemini")
+os.environ.setdefault("EMBEDDING_PROVIDER", "gemini")
+os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
+os.environ.setdefault("OLLAMA_BASE_URL", "http://localhost:11434")
 os.environ.setdefault("LOG_LEVEL", "DEBUG")
 os.environ.setdefault(
     "DATABASE_URL",

@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
 
-from core.config import config
+from core.config import config, get_embedding_dim
 
 Base = declarative_base()
 
@@ -49,7 +49,7 @@ class DocumentChunk(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False)
     chunk_text = Column(String, nullable=False)
-    embedding = Column(Vector(3072), nullable=False)
+    embedding = Column(Vector(get_embedding_dim()), nullable=False)
     chunk_index = Column(Integer, nullable=False, default=0)
     page_number = Column(Integer, nullable=True)
     character_offset_start = Column(Integer, nullable=False, default=0)

@@ -22,6 +22,8 @@ logger.debug(f"Loaded environment variables from {dotenv_path}")
 STALE_INGESTION_STATUSES = ["queued", "retrying", "extracting", "chunking", "embedding", "storing"]
 VALID_CHUNKING_STRATEGIES = {"fixed", "paragraph", "semantic"}
 VALID_QUERY_TRANSFORMATION_STRATEGIES = {"rewrite", "expand", "stepback"}
+VALID_LLM_PROVIDERS = {"gemini", "openai", "ollama"}
+VALID_EMBEDDING_PROVIDERS = {"gemini", "openai", "ollama"}
 
 
 def _get_chunking_strategy() -> str:
@@ -46,6 +48,26 @@ def _get_query_transformation_strategy() -> str:
     return strategy
 
 
+def _get_llm_provider() -> str:
+    provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower()
+    if provider not in VALID_LLM_PROVIDERS:
+        valid = ", ".join(sorted(VALID_LLM_PROVIDERS))
+        raise ValueError(
+            f"Invalid LLM_PROVIDER={provider!r}. Expected one of: {valid}."
+        )
+    return provider
+
+
+def _get_embedding_provider() -> str:
+    provider = os.getenv("EMBEDDING_PROVIDER", "gemini").strip().lower()
+    if provider not in VALID_EMBEDDING_PROVIDERS:
+        valid = ", ".join(sorted(VALID_EMBEDDING_PROVIDERS))
+        raise ValueError(
+            f"Invalid EMBEDDING_PROVIDER={provider!r}. Expected one of: {valid}."
+        )
+    return provider
+
+
 class Settings:
     APP_ENV: str = os.getenv("APP_ENV", "production")
     IS_PROD = APP_ENV.lower() == "production"
@@ -55,6 +77,16 @@ class Settings:
         1, int(os.getenv("SUPABASE_HTTP_TIMEOUT_SEC", "30"))
     )
     GEN_AI_KEY: str | None = os.getenv("GEN_AI_KEY")
+
+    # Provider selection
+    LLM_PROVIDER: str = _get_llm_provider()
+    LLM_MODEL: str | None = os.getenv("LLM_MODEL") or None
+    EMBEDDING_PROVIDER: str = _get_embedding_provider()
+    EMBEDDING_MODEL: str | None = os.getenv("EMBEDDING_MODEL") or None
+    OPENAI_API_KEY: str | None = os.getenv("OPENAI_API_KEY") or None
+    OPENAI_BASE_URL: str | None = os.getenv("OPENAI_BASE_URL") or None
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()
     LOG_USE_UTC: bool = os.getenv("LOG_USE_UTC", "false").lower() in ("1", "true", "yes")
     LOG_FORMAT: str = os.getenv("LOG_FORMAT", "TEXT").upper()  # Add this line - TEXT or JSON
@@ -166,3 +198,40 @@ def _validate_cors_origins(origins: list[str]) -> None:
 
 
 _validate_cors_origins(config.CORS_ORIGINS)
+
+
+def get_embedding_dim() -> int:
+    """Return the embedding vector dimension for the current configuration.
+
+    Resolution order:
+    1. Explicit ``EMBEDDING_DIM`` env var (user override for unknown models)
+    2. Lookup in ``KNOWN_EMBEDDING_DIMS`` using ``EMBEDDING_MODEL``
+    3. Lookup using the provider's default model
+    4. Fallback to 3072 (backward-compatible with Gemini default)
+    """
+    raw = os.getenv("EMBEDDING_DIM")
+    if raw:
+        return int(raw)
+
+    from services.providers.base import KNOWN_EMBEDDING_DIMS, _DEFAULT_EMBEDDING_MODELS
+
+    # Try the explicitly configured model name first.
+    model = config.EMBEDDING_MODEL
+    if model:
+        dim = KNOWN_EMBEDDING_DIMS.get(model)
+        if dim:
+            return dim
+        # Handle provider-prefixed names like "openai/text-embedding-3-small".
+        if "/" in model:
+            dim = KNOWN_EMBEDDING_DIMS.get(model.rsplit("/", 1)[1])
+            if dim:
+                return dim
+
+    # Fall back to the default model for the selected provider.
+    default_model = _DEFAULT_EMBEDDING_MODELS.get(config.EMBEDDING_PROVIDER)
+    if default_model:
+        dim = KNOWN_EMBEDDING_DIMS.get(default_model)
+        if dim:
+            return dim
+
+    return 3072

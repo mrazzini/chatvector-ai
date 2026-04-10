@@ -3,6 +3,7 @@
 import pytest
 
 import services.answer_service as answer_service
+import services.providers as providers_mod
 
 
 def test_load_system_prompt_returns_stripped_content(tmp_path, monkeypatch):
@@ -26,36 +27,31 @@ def test_load_system_prompt_missing_file_raises_clear_file_not_found(tmp_path, m
 
 
 @pytest.mark.asyncio
-async def test_generate_answer_passes_temperature_and_max_tokens_to_generate_content(
+async def test_generate_answer_passes_temperature_and_max_tokens_to_provider(
     monkeypatch,
 ):
+    """Verify that generate_answer forwards config values to the provider."""
     captured: dict = {}
 
-    def fake_generate_content(model, contents, config=None, **kwargs):
-        captured["model"] = model
-        captured["contents"] = contents
-        captured["config"] = config
+    class _CapturingProvider:
+        async def generate(self, prompt, *, system_instruction, temperature, max_output_tokens):
+            captured["prompt"] = prompt
+            captured["system_instruction"] = system_instruction
+            captured["temperature"] = temperature
+            captured["max_output_tokens"] = max_output_tokens
+            return "mocked answer"
 
-        class _Result:
-            text = "mocked answer"
-
-        return _Result()
-
+    providers_mod._llm_provider = _CapturingProvider()
     monkeypatch.setattr(answer_service.config, "LLM_TEMPERATURE", 0.7)
     monkeypatch.setattr(answer_service.config, "LLM_MAX_OUTPUT_TOKENS", 512)
-    monkeypatch.setattr(
-        answer_service.client.models,
-        "generate_content",
-        fake_generate_content,
-    )
 
-    result = await answer_service.generate_answer("What?", "some context")
+    try:
+        result = await answer_service.generate_answer("What?", "some context")
+    finally:
+        providers_mod._llm_provider = None
 
     assert result == "mocked answer"
-    assert captured["model"] == "gemini-2.5-flash"
-    assert captured["contents"] == "CONTEXT:\nsome context\n\nQUESTION:\nWhat?"
-    cfg = captured["config"]
-    assert cfg is not None
-    assert cfg.system_instruction == answer_service._SYSTEM_PROMPT
-    assert cfg.temperature == 0.7
-    assert cfg.max_output_tokens == 512
+    assert captured["prompt"] == "CONTEXT:\nsome context\n\nQUESTION:\nWhat?"
+    assert captured["system_instruction"] == answer_service._SYSTEM_PROMPT
+    assert captured["temperature"] == 0.7
+    assert captured["max_output_tokens"] == 512

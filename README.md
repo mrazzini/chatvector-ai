@@ -114,7 +114,7 @@ The core RAG backend and frontend demo are fully functional. Phase 2 focused on 
 
 **In progress / Phase 3:**
 - 🚧 Redis-backed durable ingestion queue (#123)
-- 🚧 Pluggable LLM & embedding providers (Gemini, OpenAI, Ollama)
+- ✅ Pluggable LLM & embedding providers (Gemini, OpenAI, Ollama)
 - 🚧 Authentication & multi-tenancy
 - 🚧 Streaming LLM responses
 
@@ -131,7 +131,7 @@ The core RAG backend and frontend demo are fully functional. Phase 2 focused on 
 
 ### AI & Retrieval Layer
 
-- **Google Gemini** — LLM generation + embeddings (pluggable providers planned)
+- **Pluggable providers** — Gemini (default), OpenAI, or Ollama for both LLM and embeddings
 - **Configurable chunking** — fixed, paragraph, or semantic strategies
 - **Query transformations** — rewrite, expand, or stepback before retrieval
 - **Prompt configuration** — externalized system prompt and LLM parameters
@@ -173,6 +173,8 @@ LOG_LEVEL=INFO
 GEN_AI_KEY=your_google_ai_studio_api_key_here
 MAX_UPLOAD_SIZE_MB=10
 ```
+
+> **Provider options:** By default, ChatVector uses Google Gemini. To use OpenAI or Ollama instead, see `backend/.env.example` for all provider configuration variables.
 
 **2. Start the stack:**
 ```bash
