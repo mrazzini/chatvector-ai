@@ -31,32 +31,32 @@ def reset_singletons():
 
 class TestGetEmbeddingProvider:
     def test_default_returns_gemini(self, monkeypatch):
-        monkeypatch.setattr("core.config.config.EMBEDDING_PROVIDER", "gemini")
+        monkeypatch.setattr(providers_mod.config, "EMBEDDING_PROVIDER", "gemini")
         provider = providers_mod.get_embedding_provider()
         assert isinstance(provider, EmbeddingProvider)
         assert type(provider).__name__ == "GeminiEmbeddingProvider"
 
     @_skip_openai
     def test_openai_selection(self, monkeypatch):
-        monkeypatch.setattr("core.config.config.EMBEDDING_PROVIDER", "openai")
+        monkeypatch.setattr(providers_mod.config, "EMBEDDING_PROVIDER", "openai")
         provider = providers_mod.get_embedding_provider()
         assert isinstance(provider, EmbeddingProvider)
         assert type(provider).__name__ == "OpenAIEmbeddingProvider"
 
     def test_ollama_selection(self, monkeypatch):
-        monkeypatch.setattr("core.config.config.EMBEDDING_PROVIDER", "ollama")
+        monkeypatch.setattr(providers_mod.config, "EMBEDDING_PROVIDER", "ollama")
         provider = providers_mod.get_embedding_provider()
         assert isinstance(provider, EmbeddingProvider)
         assert type(provider).__name__ == "OllamaEmbeddingProvider"
 
     def test_singleton_caching(self, monkeypatch):
-        monkeypatch.setattr("core.config.config.EMBEDDING_PROVIDER", "ollama")
+        monkeypatch.setattr(providers_mod.config, "EMBEDDING_PROVIDER", "ollama")
         p1 = providers_mod.get_embedding_provider()
         p2 = providers_mod.get_embedding_provider()
         assert p1 is p2
 
     def test_unknown_provider_raises(self, monkeypatch):
-        monkeypatch.setattr("core.config.config.EMBEDDING_PROVIDER", "unknown")
+        monkeypatch.setattr(providers_mod.config, "EMBEDDING_PROVIDER", "unknown")
         with pytest.raises(ValueError, match="Unknown EMBEDDING_PROVIDER"):
             providers_mod.get_embedding_provider()
 
@@ -68,31 +68,31 @@ class TestGetEmbeddingProvider:
 
 class TestGetLLMProvider:
     def test_default_returns_gemini(self, monkeypatch):
-        monkeypatch.setattr("core.config.config.LLM_PROVIDER", "gemini")
+        monkeypatch.setattr(providers_mod.config, "LLM_PROVIDER", "gemini")
         provider = providers_mod.get_llm_provider()
         assert isinstance(provider, LLMProvider)
         assert type(provider).__name__ == "GeminiLLMProvider"
 
     @_skip_openai
     def test_openai_selection(self, monkeypatch):
-        monkeypatch.setattr("core.config.config.LLM_PROVIDER", "openai")
+        monkeypatch.setattr(providers_mod.config, "LLM_PROVIDER", "openai")
         provider = providers_mod.get_llm_provider()
         assert isinstance(provider, LLMProvider)
         assert type(provider).__name__ == "OpenAILLMProvider"
 
     def test_ollama_selection(self, monkeypatch):
-        monkeypatch.setattr("core.config.config.LLM_PROVIDER", "ollama")
+        monkeypatch.setattr(providers_mod.config, "LLM_PROVIDER", "ollama")
         provider = providers_mod.get_llm_provider()
         assert isinstance(provider, LLMProvider)
         assert type(provider).__name__ == "OllamaLLMProvider"
 
     def test_singleton_caching(self, monkeypatch):
-        monkeypatch.setattr("core.config.config.LLM_PROVIDER", "ollama")
+        monkeypatch.setattr(providers_mod.config, "LLM_PROVIDER", "ollama")
         p1 = providers_mod.get_llm_provider()
         p2 = providers_mod.get_llm_provider()
         assert p1 is p2
 
     def test_unknown_provider_raises(self, monkeypatch):
-        monkeypatch.setattr("core.config.config.LLM_PROVIDER", "unknown")
+        monkeypatch.setattr(providers_mod.config, "LLM_PROVIDER", "unknown")
         with pytest.raises(ValueError, match="Unknown LLM_PROVIDER"):
             providers_mod.get_llm_provider()
