@@ -179,3 +179,189 @@ class TestOllamaErrorClassification:
         exc = httpx.ConnectError("refused")
         result = _classify_network_error(exc)
         assert isinstance(result, ProviderConnectionError)
+
+
+# ---------------------------------------------------------------------------
+# Gemini embed() response parsing and batching
+# ---------------------------------------------------------------------------
+
+
+class TestGeminiEmbedParsing:
+    """Verify GeminiEmbeddingProvider.embed() batches correctly and extracts
+    ``.values`` from each item in ``result.embeddings``."""
+
+    async def test_single_batch_happy_path(self):
+        from unittest.mock import MagicMock
+
+        from services.providers.gemini import GeminiEmbeddingProvider
+
+        provider = GeminiEmbeddingProvider(api_key="test-key")
+
+        def fake_embed_content(*, model, contents):
+            result = MagicMock()
+            result.embeddings = [MagicMock(values=[0.1, 0.2, 0.3]) for _ in contents]
+            return result
+
+        provider._client.models.embed_content = fake_embed_content
+
+        result = await provider.embed(["hello", "world"])
+
+        assert result == [[0.1, 0.2, 0.3], [0.1, 0.2, 0.3]]
+
+    async def test_large_input_is_split_into_batches_of_100(self):
+        """150 texts → 2 calls (100, 50), results concatenated in order."""
+        from unittest.mock import MagicMock
+
+        from services.providers.gemini import GeminiEmbeddingProvider
+
+        provider = GeminiEmbeddingProvider(api_key="test-key")
+
+        call_batch_sizes: list[int] = []
+
+        def fake_embed_content(*, model, contents):
+            call_batch_sizes.append(len(contents))
+            result = MagicMock()
+            # Tag each embedding with its batch size so we can assert order.
+            result.embeddings = [
+                MagicMock(values=[float(len(contents))]) for _ in contents
+            ]
+            return result
+
+        provider._client.models.embed_content = fake_embed_content
+
+        texts = [f"t{i}" for i in range(150)]
+        result = await provider.embed(texts)
+
+        assert call_batch_sizes == [100, 50]
+        assert len(result) == 150
+        assert result[0] == [100.0]    # first 100 came from the 100-sized batch
+        assert result[99] == [100.0]
+        assert result[100] == [50.0]   # last 50 came from the 50-sized batch
+        assert result[149] == [50.0]
+
+
+# ---------------------------------------------------------------------------
+# OpenAI generate() response parsing
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _has_openai, reason="openai package not installed")
+class TestOpenAIGenerateParsing:
+    """Verify OpenAILLMProvider.generate() extracts choices[0].message.content."""
+
+    async def test_returns_message_content(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from services.providers.openai import OpenAILLMProvider
+
+        provider = OpenAILLMProvider(api_key="test-key")
+
+        fake_response = MagicMock()
+        fake_response.choices = [MagicMock()]
+        fake_response.choices[0].message.content = "Hello from OpenAI"
+        provider._client.chat.completions.create = AsyncMock(return_value=fake_response)
+
+        result = await provider.generate(
+            "hi",
+            system_instruction="be helpful",
+            temperature=0.2,
+            max_output_tokens=64,
+        )
+
+        assert result == "Hello from OpenAI"
+
+    async def test_none_content_falls_back_to_placeholder(self):
+        """Exercise the ``or "No response."`` fallback when the SDK returns None."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from services.providers.openai import OpenAILLMProvider
+
+        provider = OpenAILLMProvider(api_key="test-key")
+
+        fake_response = MagicMock()
+        fake_response.choices = [MagicMock()]
+        fake_response.choices[0].message.content = None
+        provider._client.chat.completions.create = AsyncMock(return_value=fake_response)
+
+        result = await provider.generate(
+            "hi",
+            system_instruction="be helpful",
+            temperature=0.2,
+            max_output_tokens=64,
+        )
+
+        assert result == "No response."
+
+
+# ---------------------------------------------------------------------------
+# Ollama embed() / generate() response parsing
+# ---------------------------------------------------------------------------
+
+
+class TestOllamaEmbedParsing:
+    """Verify OllamaEmbeddingProvider.embed() extracts response['embeddings']."""
+
+    async def test_returns_embeddings_list(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from services.providers.ollama import OllamaEmbeddingProvider
+
+        provider = OllamaEmbeddingProvider()
+
+        fake_response = MagicMock()
+        fake_response.raise_for_status = MagicMock()
+        fake_response.json = MagicMock(
+            return_value={"embeddings": [[0.1, 0.2], [0.3, 0.4]]}
+        )
+        provider._client.post = AsyncMock(return_value=fake_response)
+
+        result = await provider.embed(["a", "b"])
+
+        assert result == [[0.1, 0.2], [0.3, 0.4]]
+
+
+class TestOllamaGenerateParsing:
+    """Verify OllamaLLMProvider.generate() parses response['response'] with fallback."""
+
+    async def test_returns_response_field(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from services.providers.ollama import OllamaLLMProvider
+
+        provider = OllamaLLMProvider()
+
+        fake_response = MagicMock()
+        fake_response.raise_for_status = MagicMock()
+        fake_response.json = MagicMock(return_value={"response": "Hi there."})
+        provider._client.post = AsyncMock(return_value=fake_response)
+
+        result = await provider.generate(
+            "hi",
+            system_instruction="be helpful",
+            temperature=0.2,
+            max_output_tokens=64,
+        )
+
+        assert result == "Hi there."
+
+    async def test_missing_response_key_falls_back_to_placeholder(self):
+        """Exercise ``.get("response", "No response.")`` when the key is absent."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from services.providers.ollama import OllamaLLMProvider
+
+        provider = OllamaLLMProvider()
+
+        fake_response = MagicMock()
+        fake_response.raise_for_status = MagicMock()
+        fake_response.json = MagicMock(return_value={})
+        provider._client.post = AsyncMock(return_value=fake_response)
+
+        result = await provider.generate(
+            "hi",
+            system_instruction="be helpful",
+            temperature=0.2,
+            max_output_tokens=64,
+        )
+
+        assert result == "No response."

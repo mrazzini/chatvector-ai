@@ -256,7 +256,7 @@ async def _llm_health_check() -> dict:
     try:
         result = await asyncio.wait_for(
             generate_answer("health check", "context: ok"),
-            timeout=15.0,
+            timeout=config.LLM_HEALTH_CHECK_TIMEOUT_SEC,
         )
     except asyncio.TimeoutError:
         return {"status": "error", "error": "timeout"}

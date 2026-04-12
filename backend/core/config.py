@@ -158,6 +158,9 @@ class Settings:
     LLM_HTTP_TIMEOUT_MS: int = max(
         1000, int(os.getenv("LLM_HTTP_TIMEOUT_MS", "60000"))
     )
+    LLM_HEALTH_CHECK_TIMEOUT_SEC: int = max(
+        1, int(os.getenv("LLM_HEALTH_CHECK_TIMEOUT_SEC", "120"))
+    )
 
     # Backwards-compatible lowercase properties for accessing config values
     @property
@@ -204,34 +207,16 @@ def get_embedding_dim() -> int:
     """Return the embedding vector dimension for the current configuration.
 
     Resolution order:
-    1. Explicit ``EMBEDDING_DIM`` env var (user override for unknown models)
-    2. Lookup in ``KNOWN_EMBEDDING_DIMS`` using ``EMBEDDING_MODEL``
-    3. Lookup using the provider's default model
-    4. Fallback to 3072 (backward-compatible with Gemini default)
+    1. Explicit ``EMBEDDING_DIM`` env var (override for unknown/custom models).
+    2. The configured provider's ``embedding_dim`` property (authoritative;
+       each provider knows the width of its own model).
     """
     raw = os.getenv("EMBEDDING_DIM")
     if raw:
         return int(raw)
 
-    from services.providers.base import KNOWN_EMBEDDING_DIMS, _DEFAULT_EMBEDDING_MODELS
+    # Deferred import: avoids a circular import at module load time and
+    # keeps the provider factory lazy for everything except this single call.
+    from services.providers import get_embedding_provider
 
-    # Try the explicitly configured model name first.
-    model = config.EMBEDDING_MODEL
-    if model:
-        dim = KNOWN_EMBEDDING_DIMS.get(model)
-        if dim:
-            return dim
-        # Handle provider-prefixed names like "openai/text-embedding-3-small".
-        if "/" in model:
-            dim = KNOWN_EMBEDDING_DIMS.get(model.rsplit("/", 1)[1])
-            if dim:
-                return dim
-
-    # Fall back to the default model for the selected provider.
-    default_model = _DEFAULT_EMBEDDING_MODELS.get(config.EMBEDDING_PROVIDER)
-    if default_model:
-        dim = KNOWN_EMBEDDING_DIMS.get(default_model)
-        if dim:
-            return dim
-
-    return 3072
+    return get_embedding_provider().embedding_dim

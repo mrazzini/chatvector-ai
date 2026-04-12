@@ -85,8 +85,13 @@ class EmbeddingProvider(ABC):
     def embedding_dim(self) -> int:
         """Return the output vector dimension for the configured model.
 
-        Uses ``KNOWN_EMBEDDING_DIMS`` lookup by model name.  Subclasses may
-        override to provide custom logic (e.g., querying the model server).
+        This is the authoritative source consulted by
+        ``core.config.get_embedding_dim()`` for pgvector column sizing.
+        Default implementation looks up ``self._model`` in
+        ``KNOWN_EMBEDDING_DIMS``; subclasses may override to query the
+        model server at runtime.  Note that the DB schema is frozen at
+        module import time, so any runtime-discovered dimension must
+        agree with it.
         """
         model: str | None = getattr(self, "_model", None)
         if model:
